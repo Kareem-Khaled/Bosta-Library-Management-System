@@ -1,10 +1,10 @@
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
-const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
 const { globalErrorHandler } = require('./middleware/errorHandler');
+const { createRateLimit, sanitizeInput } = require('./middleware/security');
 const bookRoutes = require('./routes/books');
 const borrowerRoutes = require('./routes/borrowers');
 const borrowingRoutes = require('./routes/borrowings');
@@ -16,18 +16,11 @@ const PORT = process.env.PORT || 3000;
 app.use(helmet());
 app.use(cors());
 
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
-  message: {
-    success: false,
-    error: {
-      message: 'Too many requests, please try again later.'
-    }
-  }
-});
-app.use(limiter);
+// Basic input sanitization
+app.use(sanitizeInput);
+
+// Simple rate limiting
+app.use(createRateLimit(100));
 
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));

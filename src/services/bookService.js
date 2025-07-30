@@ -1,12 +1,18 @@
 const db = require('../database/connection');
 const { NotFoundError, ConflictError, DatabaseError } = require('../middleware/errorHandler');
+const { cache } = require('../middleware/cache');
 
 class BookService {
   async getAllBooks() {
     try {
+      const cached = cache.get('all_books');
+      if (cached) return cached;
+
       const result = await db.query(
         'SELECT * FROM books ORDER BY title ASC'
       );
+      
+      cache.set('all_books', result.rows);
       return result.rows;
     } catch (error) {
       throw new DatabaseError('Failed to fetch books');
@@ -15,6 +21,9 @@ class BookService {
 
   async getBookById(id) {
     try {
+      const cached = cache.get(`book_${id}`);
+      if (cached) return cached;
+
       const result = await db.query(
         'SELECT * FROM books WHERE id = $1',
         [id]
@@ -24,7 +33,9 @@ class BookService {
         throw new NotFoundError('Book not found');
       }
       
-      return result.rows[0];
+      const book = result.rows[0];
+      cache.set(`book_${id}`, book);
+      return book;
     } catch (error) {
       if (error instanceof NotFoundError) throw error;
       throw new DatabaseError('Failed to fetch book');
@@ -39,6 +50,9 @@ class BookService {
         'INSERT INTO books (title, author, isbn, available_quantity, shelf_location) VALUES ($1, $2, $3, $4, $5) RETURNING *',
         [title, author, isbn, available_quantity, shelf_location || null]
       );
+      
+      // Clear cache
+      cache.clear();
       
       return result.rows[0];
     } catch (error) {
@@ -77,6 +91,9 @@ class BookService {
         values
       );
       
+      // Clear cache
+      cache.clear();
+      
       return result.rows[0];
     } catch (error) {
       if (error instanceof NotFoundError) throw error;
@@ -103,6 +120,10 @@ class BookService {
       }
       
       await db.query('DELETE FROM books WHERE id = $1', [id]);
+      
+      // Clear cache
+      cache.clear();
+      
       return { message: 'Book deleted successfully' };
     } catch (error) {
       if (error instanceof NotFoundError || error instanceof ConflictError) throw error;
