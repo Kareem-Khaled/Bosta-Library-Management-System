@@ -81,11 +81,13 @@ const returnBookSchema = Joi.object({
   })
 });
 
-// ID validation
-const idSchema = Joi.number().integer().positive().required().messages({
-  'number.base': 'ID must be a number',
-  'number.integer': 'ID must be an integer',
-  'number.positive': 'ID must be positive'
+// ID validation for URL parameters
+const idSchema = Joi.object({
+  id: Joi.number().integer().positive().required().messages({
+    'number.base': 'ID must be a number',
+    'number.integer': 'ID must be an integer',
+    'number.positive': 'ID must be positive'
+  })
 });
 
 module.exports = {
