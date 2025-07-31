@@ -14,6 +14,7 @@ const { createRateLimit, sanitizeInput } = require('./middleware/security');
 const bookRoutes = require('./routes/books');
 const borrowerRoutes = require('./routes/borrowers');
 const borrowingRoutes = require('./routes/borrowings');
+const reportsRoutes = require('./routes/reports');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -36,6 +37,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/api/books', bookRoutes);
 app.use('/api/borrowers', borrowerRoutes);
 app.use('/api/borrowings', borrowingRoutes);
+app.use('/api/reports', reportsRoutes);
 
 // Cache management routes
 const { cacheManager } = require('./middleware/cache');
@@ -80,7 +82,8 @@ app.get('/', (req, res) => {
       health: '/health',
       books: '/api/books',
       borrowers: '/api/borrowers',
-      borrowings: '/api/borrowings'
+      borrowings: '/api/borrowings',
+      reports: '/api/reports'
     },
     documentation: {
       books: {
@@ -106,6 +109,11 @@ app.get('/', (req, res) => {
         'POST /api/borrowings': 'Create new borrowing (rate limited)',
         'PUT /api/borrowings/:id/return': 'Return a book',
         'DELETE /api/borrowings/:id': 'Delete borrowing'
+      },
+      reports: {
+        'GET /api/reports/borrowing-analytics': 'Generate comprehensive borrowing analytics CSV report',
+        'GET /api/reports/quick-stats': 'Get quick borrowing statistics',
+        'GET /api/reports/download/:fileName': 'Download generated CSV report files'
       }
     }
   });
