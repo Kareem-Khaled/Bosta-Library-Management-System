@@ -93,15 +93,17 @@ app.use('*', (req, res) => {
 // Global error handler (must be last)
 app.use(globalErrorHandler);
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`
-    Library Management System API is running!
-    Server: http://localhost:${PORT}
-    Health: http://localhost:${PORT}/health
-    API Documentation: http://localhost:${PORT}
-    Environment: ${process.env.NODE_ENV || 'development'}
-  `);
-});
+// Start server only if not in test environment and not being imported
+if (process.env.NODE_ENV !== 'test' && require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`
+      Library Management System API is running!
+      Server: http://localhost:${PORT}
+      Health: http://localhost:${PORT}/health
+      API Documentation: http://localhost:${PORT}
+      Environment: ${process.env.NODE_ENV || 'development'}
+    `);
+  });
+}
 
 module.exports = app;

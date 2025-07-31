@@ -2,6 +2,7 @@ const express = require('express');
 const borrowingService = require('../services/borrowingService');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { validateRequest } = require('../middleware/validation');
+const { borrowingCreationRateLimit } = require('../middleware/security');
 const { createBorrowingSchema, returnBookSchema, idSchema } = require('../validators');
 
 const router = express.Router();
@@ -39,8 +40,9 @@ router.get('/:id',
   })
 );
 
-// POST /api/borrowings - Create new borrowing (borrow a book)
+// POST /api/borrowings - Create new borrowing (borrow a book) - Rate Limited
 router.post('/',
+  borrowingCreationRateLimit, // Apply rate limiting specifically to borrowing creation
   validateRequest(createBorrowingSchema),
   asyncHandler(async (req, res) => {
     const borrowing = await borrowingService.createBorrowing(req.body);

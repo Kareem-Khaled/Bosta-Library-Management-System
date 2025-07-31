@@ -2,6 +2,7 @@ const express = require('express');
 const bookService = require('../services/bookService');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { validateRequest } = require('../middleware/validation');
+const { bookCreationRateLimit } = require('../middleware/security');
 const { createBookSchema, updateBookSchema, idSchema } = require('../validators');
 
 const router = express.Router();
@@ -39,8 +40,9 @@ router.get('/:id',
   })
 );
 
-// POST /api/books - Create new book
+// POST /api/books - Create new book (Rate Limited)
 router.post('/',
+  bookCreationRateLimit, // Apply rate limiting specifically to book creation
   validateRequest(createBookSchema),
   asyncHandler(async (req, res) => {
     const book = await bookService.createBook(req.body);
