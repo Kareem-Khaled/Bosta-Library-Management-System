@@ -1,18 +1,43 @@
 const fs = require('fs');
 const path = require('path');
-const db = require('./connection');
+const sequelize = require('./sequelize');
+const Book = require('../models/Book');
+const Borrower = require('../models/Borrower');
+const Borrowing = require('../models/Borrowing');
 
 async function addBooksToDatabase() {
   try {
-    console.log('Adding books to database...');
+    console.log(' Initializing Library Database...');
+    
+    // Test database connection
+    await sequelize.authenticate();
+    console.log(' Database connection established successfully');
+    
+    // Check current book count
+    const existingCount = await Book.count();
+    console.log(` Current books in database: ${existingCount}`);
+    
+    if (existingCount > 0) {
+      console.log('  Database already contains books. Adding only new books...');
+    }
     
     // Fetch and insert real book data from API
     await fetchAndInsertBooksFromAPI();
     
-    console.log('Books added successfully!');
+    // Add sample borrowers and borrowings
+    await addSampleBorrowersAndBorrowings();
+    
+    // Final count
+    const finalCount = await Book.count();
+    const borrowerCount = await Borrower.count();
+    const borrowingCount = await Borrowing.count();
+    console.log(` Database initialization complete!`);
+    console.log(` Total books: ${finalCount}`);
+    console.log(` Total borrowers: ${borrowerCount}`);
+    console.log(` Total borrowings: ${borrowingCount}`);
     process.exit(0);
   } catch (error) {
-    console.error('Error adding books to database:', error);
+    console.error(' Error initializing database:', error);
     process.exit(1);
   }
 }
@@ -45,6 +70,7 @@ async function fetchAndInsertBooksFromAPI() {
               title: volumeInfo.title || 'Unknown Title',
               author: volumeInfo.authors ? volumeInfo.authors.join(', ') : 'Unknown Author',
               isbn: extractISBN(volumeInfo.industryIdentifiers),
+              quantity: 1, // Set default quantity
               available_quantity: Math.floor(Math.random() * 5) + 1, // Random quantity 1-5
               shelf_location: generateShelfLocation()
             };
@@ -80,25 +106,114 @@ async function fetchAndInsertBooksFromAPI() {
     });
     console.log(`... and ${allBooks.length - 5} more books\n`);
     
-    // Insert books into database
+    // Insert books into database using Sequelize ORM
     let insertedCount = 0;
+    let skippedCount = 0;
+    
     for (const book of allBooks) {
       try {
-        await db.query(
-          'INSERT INTO books (title, author, isbn, available_quantity, shelf_location) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (isbn) DO NOTHING',
-          [book.title, book.author, book.isbn, book.available_quantity, book.shelf_location]
-        );
-        insertedCount++;
+        const [bookInstance, created] = await Book.findOrCreate({
+          where: { isbn: book.isbn },
+          defaults: book
+        });
+        
+        if (created) {
+          insertedCount++;
+        } else {
+          skippedCount++;
+        }
       } catch (error) {
-        console.warn(`Failed to insert book: ${book.title}`, error.message);
+        console.warn(`  Failed to insert book: ${book.title} - ${error.message}`);
       }
     }
     
-    console.log(`Successfully inserted ${insertedCount} books into database`);
+    console.log(` Successfully inserted ${insertedCount} new books`);
+    if (skippedCount > 0) {
+      console.log(`  Skipped ${skippedCount} books (already exist)`);
+    }
     
   } catch (error) {
     console.error('Error fetching books from API:', error);
     throw error; // Don't fallback, just throw the error
+  }
+}
+
+async function addSampleBorrowersAndBorrowings() {
+  try {
+    console.log(' Adding sample borrowers...');
+    
+    const sampleBorrowers = [
+      { name: 'John Doe', email: 'john.doe@example.com' },
+      { name: 'Jane Smith', email: 'jane.smith@example.com' },
+      { name: 'Alice Johnson', email: 'alice.johnson@example.com' },
+      { name: 'Bob Wilson', email: 'bob.wilson@example.com' },
+      { name: 'Emma Davis', email: 'emma.davis@example.com' }
+    ];
+    
+    let borrowerCount = 0;
+    for (const borrowerData of sampleBorrowers) {
+      const [borrower, created] = await Borrower.findOrCreate({
+        where: { email: borrowerData.email },
+        defaults: borrowerData
+      });
+      if (created) borrowerCount++;
+    }
+    
+    console.log(` Added ${borrowerCount} new borrowers`);
+    
+    // Add sample borrowings
+    console.log(' Adding sample borrowings...');
+    
+    const books = await Book.findAll({ limit: 10 });
+    const borrowers = await Borrower.findAll();
+    
+    if (books.length > 0 && borrowers.length > 0) {
+      const sampleBorrowings = [
+        {
+          borrower_id: borrowers[0].id,
+          book_id: books[0].id,
+          borrow_date: new Date('2025-07-25'),
+          due_date: new Date('2025-08-08')
+        },
+        {
+          borrower_id: borrowers[1].id,
+          book_id: books[1].id,
+          borrow_date: new Date('2025-07-27'),
+          due_date: new Date('2025-08-10')
+        },
+        {
+          borrower_id: borrowers[2].id,
+          book_id: books[2].id,
+          borrow_date: new Date('2025-07-29'),
+          due_date: new Date('2025-08-12')
+        }
+      ];
+      
+      let borrowingCount = 0;
+      for (const borrowingData of sampleBorrowings) {
+        try {
+          const existingBorrowing = await Borrowing.findOne({
+            where: {
+              borrower_id: borrowingData.borrower_id,
+              book_id: borrowingData.book_id,
+              return_date: null
+            }
+          });
+          
+          if (!existingBorrowing) {
+            await Borrowing.create(borrowingData);
+            borrowingCount++;
+          }
+        } catch (error) {
+          console.warn(`  Failed to create borrowing: ${error.message}`);
+        }
+      }
+      
+      console.log(` Added ${borrowingCount} new borrowings`);
+    }
+    
+  } catch (error) {
+    console.error(' Error adding sample data:', error);
   }
 }
 

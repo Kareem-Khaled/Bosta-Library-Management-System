@@ -4,11 +4,12 @@ const { asyncHandler } = require('../middleware/errorHandler');
 const { validateRequest } = require('../middleware/validation');
 const { bookCreationRateLimit } = require('../middleware/security');
 const { createBookSchema, updateBookSchema, idSchema } = require('../validators');
+const { middleware: cacheMiddleware, cacheManager } = require('../middleware/cache');
 
 const router = express.Router();
 
-// GET /api/books - Get all books
-router.get('/', asyncHandler(async (req, res) => {
+// GET /api/books - Get all books (with caching)
+router.get('/', cacheMiddleware.bookList, asyncHandler(async (req, res) => {
   const { search, available } = req.query;
   
   let books;
@@ -27,9 +28,10 @@ router.get('/', asyncHandler(async (req, res) => {
   });
 }));
 
-// GET /api/books/:id - Get book by ID
+// GET /api/books/:id - Get book by ID (with caching)
 router.get('/:id', 
   validateRequest(idSchema, 'params'),
+  cacheMiddleware.bookDetail,
   asyncHandler(async (req, res) => {
     const book = await bookService.getBookById(req.params.id);
     
@@ -47,6 +49,9 @@ router.post('/',
   asyncHandler(async (req, res) => {
     const book = await bookService.createBook(req.body);
     
+    // Invalidate book list cache after creation
+    cacheManager.invalidateBookCache();
+    
     res.status(201).json({
       success: true,
       message: 'Book created successfully',
@@ -62,6 +67,9 @@ router.put('/:id',
   asyncHandler(async (req, res) => {
     const book = await bookService.updateBook(req.params.id, req.body);
     
+    // Invalidate specific book cache after update
+    cacheManager.invalidateBookCache(req.params.id);
+    
     res.json({
       success: true,
       message: 'Book updated successfully',
@@ -76,9 +84,12 @@ router.delete('/:id',
   asyncHandler(async (req, res) => {
     const result = await bookService.deleteBook(req.params.id);
     
+    // Invalidate specific book cache after deletion
+    cacheManager.invalidateBookCache(req.params.id);
+    
     res.json({
       success: true,
-      message: result.message
+      ...result
     });
   })
 );
