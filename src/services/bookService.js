@@ -1,19 +1,14 @@
-const db = require('../database/connection');
-const { NotFoundError, ConflictError, DatabaseError } = require('../middleware/errorHandler');
-const { cache } = require('../middleware/cache');
+const { Book } = require('../models');
+const { NotFoundError, ConflictError, DatabaseError, ValidationError } = require('../middleware/errorHandler');
+const { Op } = require('sequelize');
 
 class BookService {
   async getAllBooks() {
     try {
-      const cached = cache.get('all_books');
-      if (cached) return cached;
-
-      const result = await db.query(
-        'SELECT * FROM books ORDER BY title ASC'
-      );
-      
-      cache.set('all_books', result.rows);
-      return result.rows;
+      const books = await Book.findAll({
+        order: [['created_at', 'DESC']]
+      });
+      return books;
     } catch (error) {
       throw new DatabaseError('Failed to fetch books');
     }
@@ -21,20 +16,12 @@ class BookService {
 
   async getBookById(id) {
     try {
-      const cached = cache.get(`book_${id}`);
-      if (cached) return cached;
-
-      const result = await db.query(
-        'SELECT * FROM books WHERE id = $1',
-        [id]
-      );
+      const book = await Book.findByPk(id);
       
-      if (result.rows.length === 0) {
+      if (!book) {
         throw new NotFoundError('Book not found');
       }
       
-      const book = result.rows[0];
-      cache.set(`book_${id}`, book);
       return book;
     } catch (error) {
       if (error instanceof NotFoundError) throw error;
@@ -44,20 +31,24 @@ class BookService {
 
   async createBook(bookData) {
     try {
-      const { title, author, isbn, available_quantity, shelf_location } = bookData;
+      const { title, author, isbn, quantity, shelf_location } = bookData;
       
-      const result = await db.query(
-        'INSERT INTO books (title, author, isbn, available_quantity, shelf_location) VALUES ($1, $2, $3, $4, $5) RETURNING *',
-        [title, author, isbn, available_quantity, shelf_location || null]
-      );
+      const book = await Book.create({
+        title,
+        author,
+        isbn,
+        quantity,
+        available_quantity: quantity,
+        shelf_location
+      });
       
-      // Clear cache
-      cache.clear();
-      
-      return result.rows[0];
+      return book;
     } catch (error) {
-      if (error.code === '23505') {
+      if (error.name === 'SequelizeUniqueConstraintError') {
         throw new ConflictError('Book with this ISBN already exists');
+      }
+      if (error.name === 'SequelizeValidationError') {
+        throw new ValidationError(error.errors.map(e => e.message).join(', '));
       }
       throw new DatabaseError('Failed to create book');
     }
@@ -65,40 +56,28 @@ class BookService {
 
   async updateBook(id, bookData) {
     try {
-      // First check if book exists
-      await this.getBookById(id);
+      const book = await Book.findByPk(id);
       
-      const fields = [];
-      const values = [];
-      let paramCount = 1;
-      
-      Object.keys(bookData).forEach(key => {
-        if (bookData[key] !== undefined) {
-          fields.push(`${key} = $${paramCount}`);
-          values.push(bookData[key]);
-          paramCount++;
-        }
-      });
-      
-      if (fields.length === 0) {
-        throw new ValidationError('No valid fields to update');
+      if (!book) {
+        throw new NotFoundError('Book not found');
+      }
+
+      // If quantity is being updated, adjust available_quantity proportionally
+      if (bookData.quantity !== undefined) {
+        const borrowedQuantity = book.quantity - book.available_quantity;
+        bookData.available_quantity = Math.max(0, bookData.quantity - borrowedQuantity);
       }
       
-      values.push(id);
+      await book.update(bookData);
       
-      const result = await db.query(
-        `UPDATE books SET ${fields.join(', ')} WHERE id = $${paramCount} RETURNING *`,
-        values
-      );
-      
-      // Clear cache
-      cache.clear();
-      
-      return result.rows[0];
+      return book;
     } catch (error) {
       if (error instanceof NotFoundError) throw error;
-      if (error.code === '23505') {
+      if (error.name === 'SequelizeUniqueConstraintError') {
         throw new ConflictError('Book with this ISBN already exists');
+      }
+      if (error.name === 'SequelizeValidationError') {
+        throw new ValidationError(error.errors.map(e => e.message).join(', '));
       }
       throw new DatabaseError('Failed to update book');
     }
@@ -106,23 +85,26 @@ class BookService {
 
   async deleteBook(id) {
     try {
-      // Check if book exists
-      await this.getBookById(id);
+      const book = await Book.findByPk(id);
+      
+      if (!book) {
+        throw new NotFoundError('Book not found');
+      }
       
       // Check if book has active borrowings
-      const borrowingsResult = await db.query(
-        'SELECT COUNT(*) FROM borrowings WHERE book_id = $1 AND return_date IS NULL',
-        [id]
-      );
+      const { Borrowing } = require('../models');
+      const activeBorrowings = await Borrowing.count({
+        where: {
+          book_id: id,
+          return_date: null
+        }
+      });
       
-      if (parseInt(borrowingsResult.rows[0].count) > 0) {
+      if (activeBorrowings > 0) {
         throw new ConflictError('Cannot delete book with active borrowings');
       }
       
-      await db.query('DELETE FROM books WHERE id = $1', [id]);
-      
-      // Clear cache
-      cache.clear();
+      await book.destroy();
       
       return { message: 'Book deleted successfully' };
     } catch (error) {
@@ -131,13 +113,20 @@ class BookService {
     }
   }
 
-  async searchBooks(query) {
+  async searchBooks(searchTerm) {
     try {
-      const result = await db.query(
-        'SELECT * FROM books WHERE title ILIKE $1 OR author ILIKE $1 OR isbn ILIKE $1 ORDER BY title ASC',
-        [`%${query}%`]
-      );
-      return result.rows;
+      const books = await Book.findAll({
+        where: {
+          [Op.or]: [
+            { title: { [Op.iLike]: `%${searchTerm}%` } },
+            { author: { [Op.iLike]: `%${searchTerm}%` } },
+            { isbn: { [Op.iLike]: `%${searchTerm}%` } }
+          ]
+        },
+        order: [['created_at', 'DESC']]
+      });
+      
+      return books;
     } catch (error) {
       throw new DatabaseError('Failed to search books');
     }
@@ -145,10 +134,14 @@ class BookService {
 
   async getAvailableBooks() {
     try {
-      const result = await db.query(
-        'SELECT * FROM books WHERE available_quantity > 0 ORDER BY title ASC'
-      );
-      return result.rows;
+      const books = await Book.findAll({
+        where: {
+          available_quantity: { [Op.gt]: 0 }
+        },
+        order: [['title', 'ASC']]
+      });
+      
+      return books;
     } catch (error) {
       throw new DatabaseError('Failed to fetch available books');
     }

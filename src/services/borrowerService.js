@@ -1,13 +1,14 @@
-const db = require('../database/connection');
-const { NotFoundError, ConflictError, DatabaseError } = require('../middleware/errorHandler');
+const { Borrower } = require('../models');
+const { NotFoundError, ConflictError, DatabaseError, ValidationError } = require('../middleware/errorHandler');
+const { Op } = require('sequelize');
 
 class BorrowerService {
   async getAllBorrowers() {
     try {
-      const result = await db.query(
-        'SELECT * FROM borrowers ORDER BY name ASC'
-      );
-      return result.rows;
+      const borrowers = await Borrower.findAll({
+        order: [['created_at', 'DESC']]
+      });
+      return borrowers;
     } catch (error) {
       throw new DatabaseError('Failed to fetch borrowers');
     }
@@ -15,16 +16,21 @@ class BorrowerService {
 
   async getBorrowerById(id) {
     try {
-      const result = await db.query(
-        'SELECT * FROM borrowers WHERE id = $1',
-        [id]
-      );
+      const borrower = await Borrower.findByPk(id, {
+        include: [{
+          association: 'borrowings',
+          include: [{
+            association: 'book',
+            attributes: ['title', 'author', 'isbn']
+          }]
+        }]
+      });
       
-      if (result.rows.length === 0) {
+      if (!borrower) {
         throw new NotFoundError('Borrower not found');
       }
       
-      return result.rows[0];
+      return borrower;
     } catch (error) {
       if (error instanceof NotFoundError) throw error;
       throw new DatabaseError('Failed to fetch borrower');
@@ -33,17 +39,21 @@ class BorrowerService {
 
   async createBorrower(borrowerData) {
     try {
-      const { name, email, registered_date } = borrowerData;
+      const { name, email, phone } = borrowerData;
       
-      const result = await db.query(
-        'INSERT INTO borrowers (name, email, registered_date) VALUES ($1, $2, $3) RETURNING *',
-        [name, email, registered_date || new Date()]
-      );
+      const borrower = await Borrower.create({
+        name,
+        email,
+        phone
+      });
       
-      return result.rows[0];
+      return borrower;
     } catch (error) {
-      if (error.code === '23505') {
+      if (error.name === 'SequelizeUniqueConstraintError') {
         throw new ConflictError('Borrower with this email already exists');
+      }
+      if (error.name === 'SequelizeValidationError') {
+        throw new ValidationError(error.errors.map(e => e.message).join(', '));
       }
       throw new DatabaseError('Failed to create borrower');
     }
@@ -51,37 +61,22 @@ class BorrowerService {
 
   async updateBorrower(id, borrowerData) {
     try {
-      // First check if borrower exists
-      await this.getBorrowerById(id);
+      const borrower = await Borrower.findByPk(id);
       
-      const fields = [];
-      const values = [];
-      let paramCount = 1;
-      
-      Object.keys(borrowerData).forEach(key => {
-        if (borrowerData[key] !== undefined) {
-          fields.push(`${key} = $${paramCount}`);
-          values.push(borrowerData[key]);
-          paramCount++;
-        }
-      });
-      
-      if (fields.length === 0) {
-        throw new ValidationError('No valid fields to update');
+      if (!borrower) {
+        throw new NotFoundError('Borrower not found');
       }
       
-      values.push(id);
+      await borrower.update(borrowerData);
       
-      const result = await db.query(
-        `UPDATE borrowers SET ${fields.join(', ')} WHERE id = $${paramCount} RETURNING *`,
-        values
-      );
-      
-      return result.rows[0];
+      return borrower;
     } catch (error) {
       if (error instanceof NotFoundError) throw error;
-      if (error.code === '23505') {
+      if (error.name === 'SequelizeUniqueConstraintError') {
         throw new ConflictError('Borrower with this email already exists');
+      }
+      if (error.name === 'SequelizeValidationError') {
+        throw new ValidationError(error.errors.map(e => e.message).join(', '));
       }
       throw new DatabaseError('Failed to update borrower');
     }
@@ -89,20 +84,27 @@ class BorrowerService {
 
   async deleteBorrower(id) {
     try {
-      // Check if borrower exists
-      await this.getBorrowerById(id);
+      const borrower = await Borrower.findByPk(id);
+      
+      if (!borrower) {
+        throw new NotFoundError('Borrower not found');
+      }
       
       // Check if borrower has active borrowings
-      const borrowingsResult = await db.query(
-        'SELECT COUNT(*) FROM borrowings WHERE borrower_id = $1 AND return_date IS NULL',
-        [id]
-      );
+      const { Borrowing } = require('../models');
+      const activeBorrowings = await Borrowing.count({
+        where: {
+          borrower_id: id,
+          return_date: null
+        }
+      });
       
-      if (parseInt(borrowingsResult.rows[0].count) > 0) {
+      if (activeBorrowings > 0) {
         throw new ConflictError('Cannot delete borrower with active borrowings');
       }
       
-      await db.query('DELETE FROM borrowers WHERE id = $1', [id]);
+      await borrower.destroy();
+      
       return { message: 'Borrower deleted successfully' };
     } catch (error) {
       if (error instanceof NotFoundError || error instanceof ConflictError) throw error;
@@ -110,42 +112,46 @@ class BorrowerService {
     }
   }
 
-  async getBorrowerHistory(id) {
+  async searchBorrowers(searchTerm) {
     try {
-      // First check if borrower exists
-      await this.getBorrowerById(id);
+      const borrowers = await Borrower.findAll({
+        where: {
+          [Op.or]: [
+            { name: { [Op.iLike]: `%${searchTerm}%` } },
+            { email: { [Op.iLike]: `%${searchTerm}%` } }
+          ]
+        },
+        order: [['created_at', 'DESC']]
+      });
       
-      const result = await db.query(`
-        SELECT 
-          br.id,
-          br.borrow_date,
-          br.due_date,
-          br.return_date,
-          b.title,
-          b.author,
-          b.isbn
-        FROM borrowings br
-        JOIN books b ON br.book_id = b.id
-        WHERE br.borrower_id = $1
-        ORDER BY br.borrow_date DESC
-      `, [id]);
-      
-      return result.rows;
+      return borrowers;
     } catch (error) {
-      if (error instanceof NotFoundError) throw error;
-      throw new DatabaseError('Failed to fetch borrower history');
+      throw new DatabaseError('Failed to search borrowers');
     }
   }
 
-  async searchBorrowers(query) {
+  async getBorrowerWithActiveBorrowings(id) {
     try {
-      const result = await db.query(
-        'SELECT * FROM borrowers WHERE name ILIKE $1 OR email ILIKE $1 ORDER BY name ASC',
-        [`%${query}%`]
-      );
-      return result.rows;
+      const borrower = await Borrower.findByPk(id, {
+        include: [{
+          association: 'borrowings',
+          where: { return_date: null },
+          required: false,
+          include: [{
+            association: 'book',
+            attributes: ['title', 'author', 'isbn']
+          }]
+        }]
+      });
+      
+      if (!borrower) {
+        throw new NotFoundError('Borrower not found');
+      }
+      
+      return borrower;
     } catch (error) {
-      throw new DatabaseError('Failed to search borrowers');
+      if (error instanceof NotFoundError) throw error;
+      throw new DatabaseError('Failed to fetch borrower with active borrowings');
     }
   }
 }
