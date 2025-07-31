@@ -1,23 +1,134 @@
 const fs = require('fs');
 const path = require('path');
+const { Sequelize } = require('sequelize');
 const sequelize = require('./sequelize');
 const Book = require('../models/Book');
 const Borrower = require('../models/Borrower');
 const Borrowing = require('../models/Borrowing');
 
-async function addBooksToDatabase() {
+async function createDatabaseIfNotExists() {
   try {
-    console.log(' Initializing Library Database...');
+    console.log(' Checking if database exists...');
+    
+    // Get database config from environment or default values
+    const dbHost = process.env.DB_HOST || 'localhost';
+    const dbPort = process.env.DB_PORT || 5432;
+    const dbUser = process.env.DB_USER || 'postgres';
+    const dbPassword = process.env.DB_PASSWORD || 'password';
+    const dbName = process.env.DB_NAME || 'library_management';
+    
+    // Create a connection to PostgreSQL without specifying database
+    const adminSequelize = new Sequelize('postgres', dbUser, dbPassword, {
+      host: dbHost,
+      port: dbPort,
+      dialect: 'postgres',
+      logging: false // Disable logging for cleaner output
+    });
+    
+    try {
+      // Test connection to PostgreSQL server
+      await adminSequelize.authenticate();
+      console.log(' Connected to PostgreSQL server');
+      
+      // Check if database exists
+      const [results] = await adminSequelize.query(
+        `SELECT 1 FROM pg_database WHERE datname = '${dbName}'`
+      );
+      
+      if (results.length === 0) {
+        console.log(`  Database '${dbName}' does not exist. Creating it...`);
+        await adminSequelize.query(`CREATE DATABASE "${dbName}"`);
+        console.log(` Database '${dbName}' created successfully`);
+      } else {
+        console.log(` Database '${dbName}' already exists`);
+      }
+      
+      await adminSequelize.close();
+      return true;
+      
+    } catch (error) {
+      await adminSequelize.close();
+      throw error;
+    }
+    
+  } catch (error) {
+    console.error(' Error creating database:', error.message);
+    console.log(' Make sure PostgreSQL is running and credentials are correct');
+    return false;
+  }
+}
+
+async function createTablesIfNotExist() {
+  try {
+    console.log('🔧 Creating database tables if they don\'t exist...');
+    
+    // Sync all models (create tables)
+    await sequelize.sync({ alter: false });
+    console.log(' Database tables ready');
+    
+    return true;
+  } catch (error) {
+    console.error(' Error creating tables:', error);
+    return false;
+  }
+}
+
+async function resetDatabase() {
+  try {
+    console.log(' Resetting database...');
     
     // Test database connection
     await sequelize.authenticate();
     console.log(' Database connection established successfully');
     
+    // Clear all data in correct order (respecting foreign keys)
+    // Use DELETE instead of TRUNCATE to avoid foreign key constraint issues
+    await Borrowing.destroy({ where: {}, force: true });
+    await Book.destroy({ where: {}, force: true });
+    await Borrower.destroy({ where: {}, force: true });
+    
+    console.log('  All existing data cleared');
+    
+    return true;
+  } catch (error) {
+    console.error(' Error resetting database:', error);
+    return false;
+  }
+}
+
+async function addBooksToDatabase(shouldReset = false) {
+  try {
+    console.log(' Initializing Library Database...');
+    
+    // Create database if it doesn't exist
+    const dbCreated = await createDatabaseIfNotExists();
+    if (!dbCreated) {
+      throw new Error('Failed to create database');
+    }
+    
+    // Create tables if they don't exist
+    const tablesCreated = await createTablesIfNotExist();
+    if (!tablesCreated) {
+      throw new Error('Failed to create database tables');
+    }
+    
+    // Reset database if requested
+    if (shouldReset) {
+      const resetSuccess = await resetDatabase();
+      if (!resetSuccess) {
+        throw new Error('Failed to reset database');
+      }
+    } else {
+      // Test database connection
+      await sequelize.authenticate();
+      console.log(' Database connection established successfully');
+    }
+    
     // Check current book count
     const existingCount = await Book.count();
     console.log(` Current books in database: ${existingCount}`);
     
-    if (existingCount > 0) {
+    if (existingCount > 0 && !shouldReset) {
       console.log('  Database already contains books. Adding only new books...');
     }
     
@@ -31,7 +142,7 @@ async function addBooksToDatabase() {
     const finalCount = await Book.count();
     const borrowerCount = await Borrower.count();
     const borrowingCount = await Borrowing.count();
-    console.log(` Database initialization complete!`);
+    console.log(' Database initialization complete!');
     console.log(` Total books: ${finalCount}`);
     console.log(` Total borrowers: ${borrowerCount}`);
     console.log(` Total borrowings: ${borrowingCount}`);
@@ -44,7 +155,7 @@ async function addBooksToDatabase() {
 
 async function fetchAndInsertBooksFromAPI() {
   try {
-    console.log('Fetching random books from Google Books API...');
+    console.log(' Fetching random books from Google Books API...');
     
     const allBooks = [];
     
@@ -55,7 +166,7 @@ async function fetchAndInsertBooksFromAPI() {
         const response = await fetch(`https://www.googleapis.com/books/v1/volumes?q=subject:fiction&maxResults=10&startIndex=${startIndex}&langRestrict=en`);
         
         if (!response.ok) {
-          console.warn(`Failed to fetch books at index ${startIndex}`);
+          console.warn(`  Failed to fetch books at index ${startIndex}`);
           continue;
         }
         
@@ -66,12 +177,14 @@ async function fetchAndInsertBooksFromAPI() {
             const volumeInfo = item.volumeInfo;
             
             // Extract book information
+            const totalCopies = Math.floor(Math.random() * 5) + 1; // Random 1-5 total copies
+            const borrowedCopies = Math.floor(Math.random() * totalCopies); // Random borrowed (0 to totalCopies-1)
             const book = {
               title: volumeInfo.title || 'Unknown Title',
               author: volumeInfo.authors ? volumeInfo.authors.join(', ') : 'Unknown Author',
               isbn: extractISBN(volumeInfo.industryIdentifiers),
-              quantity: 1, // Set default quantity
-              available_quantity: Math.floor(Math.random() * 5) + 1, // Random quantity 1-5
+              quantity: totalCopies, // Total copies owned by library
+              available_quantity: totalCopies - borrowedCopies, // Available = Total - Borrowed
               shelf_location: generateShelfLocation()
             };
             
@@ -86,12 +199,12 @@ async function fetchAndInsertBooksFromAPI() {
         await new Promise(resolve => setTimeout(resolve, 300));
         
       } catch (error) {
-        console.warn(`Error fetching books at index ${startIndex}:`, error.message);
+        console.warn(`  Error fetching books at index ${startIndex}:`, error.message);
         continue;
       }
     }
     
-    console.log(`Fetched ${allBooks.length} books from API`);
+    console.log(` Fetched ${allBooks.length} books from API`);
     
     // Show the first 5 books as preview
     console.log('\n Preview of fetched books:');
@@ -100,7 +213,8 @@ async function fetchAndInsertBooksFromAPI() {
       console.log(`${index + 1}. Title: ${book.title}`);
       console.log(`   Author: ${book.author}`);
       console.log(`   ISBN: ${book.isbn}`);
-      console.log(`   Quantity: ${book.available_quantity}`);
+      console.log(`   Total Copies: ${book.quantity}`);
+      console.log(`   Available: ${book.available_quantity}`);
       console.log(`   Shelf: ${book.shelf_location}`);
       console.log('   ---');
     });
@@ -133,7 +247,7 @@ async function fetchAndInsertBooksFromAPI() {
     }
     
   } catch (error) {
-    console.error('Error fetching books from API:', error);
+    console.error(' Error fetching books from API:', error);
     throw error; // Don't fallback, just throw the error
   }
 }
@@ -172,20 +286,20 @@ async function addSampleBorrowersAndBorrowings() {
         {
           borrower_id: borrowers[0].id,
           book_id: books[0].id,
-          borrow_date: new Date('2025-07-25'),
-          due_date: new Date('2025-08-08')
+          borrow_date: new Date('2025-07-15'),
+          due_date: new Date('2025-07-29')
         },
         {
           borrower_id: borrowers[1].id,
           book_id: books[1].id,
-          borrow_date: new Date('2025-07-27'),
-          due_date: new Date('2025-08-10')
+          borrow_date: new Date('2025-07-20'),
+          due_date: new Date('2025-08-03')
         },
         {
           borrower_id: borrowers[2].id,
           book_id: books[2].id,
-          borrow_date: new Date('2025-07-29'),
-          due_date: new Date('2025-08-12')
+          borrow_date: new Date('2025-07-25'),
+          due_date: new Date('2025-08-08')
         }
       ];
       
@@ -240,7 +354,18 @@ function generateShelfLocation() {
 
 // Run book addition if this file is executed directly
 if (require.main === module) {
-  addBooksToDatabase();
+  // Check if --reset flag is passed
+  const shouldReset = process.argv.includes('--reset');
+  if (shouldReset) {
+    console.log(' Reset flag detected - will clear all existing data first');
+  }
+  addBooksToDatabase(shouldReset);
 }
 
-module.exports = { addBooksToDatabase, fetchAndInsertBooksFromAPI };
+module.exports = { 
+  addBooksToDatabase, 
+  fetchAndInsertBooksFromAPI, 
+  resetDatabase,
+  createDatabaseIfNotExists,
+  createTablesIfNotExist
+};
