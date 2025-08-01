@@ -164,5 +164,3 @@ npm test              # Run tests
 ```
 
 ---
-
-⭐ **If you found this project helpful, please give it a star!** ⭐
