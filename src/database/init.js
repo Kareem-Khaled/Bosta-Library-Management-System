@@ -60,7 +60,7 @@ async function createDatabaseIfNotExists() {
 
 async function createTablesIfNotExist() {
   try {
-    console.log('🔧 Creating database tables if they don\'t exist...');
+    console.log(' Creating database tables if they don\'t exist...');
     
     // Sync all models (create tables)
     await sequelize.sync({ alter: false });
