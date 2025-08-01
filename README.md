@@ -56,18 +56,47 @@ A comprehensive RESTful API for library management built with Node.js, Express.j
    ```
 
 4. **Database setup**
+   
+   **Option A: Automatic Setup (Recommended)**
    ```bash
    npm run init-db    # Initialize database
-   npm run sync-db    # Sync models
+   npm run sync-db    # Sync models with sample data
    ```
+   
+   **Option B: Manual Setup**
+   ```bash
+   # Create database manually in PostgreSQL
+   createdb library_management
+   
+   # Run the setup script
+   psql -d library_management -f database/setup.sql
+   ```
+   
+   **📋 Database Schema**: See `database/schema-diagram.md` for detailed ERD and constraints
 
 5. **Start the server**
    ```bash
    npm start          # Production
-   npm run dev        # Development
+   npm run dev        # Development with auto-reload
+   ```
+
+6. **Verify setup**
+   ```bash
+   # Test the API
+   curl http://localhost:3000/api/books
+   
+   # Check quick stats
+   curl http://localhost:3000/api/reports/quick-stats
    ```
 
 🎉 **Server running at** `http://localhost:3000`
+
+## 📖 Complete Documentation
+
+- **📋 Database Schema**: [`database/schema-diagram.md`](database/schema-diagram.md) - ERD, constraints, and indexes
+- **🔧 Setup Scripts**: [`database/setup.sql`](database/setup.sql) - Complete database initialization
+- **📡 API Documentation**: [`docs/API-Documentation.md`](docs/API-Documentation.md) - All endpoints with examples
+- **🗂️ Sample Data**: Included in setup scripts for immediate testing
 
 ## 📡 API Endpoints
 
@@ -75,8 +104,9 @@ A comprehensive RESTful API for library management built with Node.js, Express.j
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/api/books` | Get all books |
-| `GET` | `/api/books?search=title` | Search books |
-| `GET` | `/api/books?available=true` | Get available books |
+| `GET` | `/api/books?search=title` | Search books by title, author, or ISBN |
+| `GET` | `/api/books?available=true` | Get only available books |
+| `GET` | `/api/books?search=gatsby&available=true` | Combined search and availability filter |
 | `GET` | `/api/books/:id` | Get book by ID |
 | `POST` | `/api/books` | Create new book |
 | `PUT` | `/api/books/:id` | Update book |
@@ -146,6 +176,36 @@ curl -X GET "http://localhost:3000/api/reports/borrowing-analytics?startDate=202
 ```
 
 ## � Usage Examples
+
+### Search Books (Comprehensive Search)
+```bash
+# Search by title
+curl -X GET "http://localhost:3000/api/books?search=gatsby"
+
+# Search by author name
+curl -X GET "http://localhost:3000/api/books?search=fitzgerald"
+
+# Search by ISBN
+curl -X GET "http://localhost:3000/api/books?search=9780743273565"
+
+# Search with partial matches (case-insensitive)
+curl -X GET "http://localhost:3000/api/books?search=great"
+
+# Get only available books
+curl -X GET "http://localhost:3000/api/books?available=true"
+
+# Combined search and availability filter
+curl -X GET "http://localhost:3000/api/books?search=programming&available=true"
+
+# Get all books (no filters)
+curl -X GET "http://localhost:3000/api/books"
+```
+
+**Search Features:**
+- **Multi-field search**: Searches across title, author, and ISBN simultaneously
+- **Case-insensitive**: Works with any case combination
+- **Partial matching**: Finds books with partial word matches
+- **Flexible filtering**: Combine search with availability filters
 
 ### Create a Book
 ```bash
