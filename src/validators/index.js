@@ -14,7 +14,12 @@ const createBookSchema = Joi.object({
     'string.pattern.base': 'ISBN must be 10 or 13 digits',
     'string.empty': 'ISBN is required'
   }),
-  available_quantity: Joi.number().integer().min(0).required().messages({
+  quantity: Joi.number().integer().min(1).required().messages({
+    'number.base': 'Quantity must be a number',
+    'number.integer': 'Quantity must be an integer',
+    'number.min': 'Quantity must be at least 1'
+  }),
+  available_quantity: Joi.number().integer().min(0).optional().messages({
     'number.base': 'Available quantity must be a number',
     'number.integer': 'Available quantity must be an integer',
     'number.min': 'Available quantity cannot be negative'
@@ -22,14 +27,30 @@ const createBookSchema = Joi.object({
   shelf_location: Joi.string().max(100).optional().allow('').messages({
     'string.max': 'Shelf location must be less than 100 characters'
   })
+}).custom((value, helpers) => {
+  if (value.available_quantity !== undefined && value.available_quantity > value.quantity) {
+    return helpers.error('available_quantity.greater_than_quantity');
+  }
+  return value;
+}).messages({
+  'available_quantity.greater_than_quantity': 'Available quantity cannot be greater than total quantity'
 });
 
 const updateBookSchema = Joi.object({
   title: Joi.string().min(1).max(255).optional(),
   author: Joi.string().min(1).max(255).optional(),
   isbn: Joi.string().pattern(/^[0-9]{10}$|^[0-9]{13}$/).optional(),
+  quantity: Joi.number().integer().min(1).optional(),
   available_quantity: Joi.number().integer().min(0).optional(),
   shelf_location: Joi.string().max(100).optional().allow('')
+}).custom((value, helpers) => {
+  if (value.available_quantity !== undefined && value.quantity !== undefined && 
+      value.available_quantity > value.quantity) {
+    return helpers.error('available_quantity.greater_than_quantity');
+  }
+  return value;
+}).messages({
+  'available_quantity.greater_than_quantity': 'Available quantity cannot be greater than total quantity'
 });
 
 // Borrower validation schemas
@@ -43,6 +64,9 @@ const createBorrowerSchema = Joi.object({
     'string.empty': 'Email is required',
     'string.max': 'Email must be less than 255 characters'
   }),
+  phone: Joi.string().pattern(/^\+?[1-9]\d{1,14}$/).optional().allow('').messages({
+    'string.pattern.base': 'Phone number must be a valid international format'
+  }),
   registered_date: Joi.date().optional().messages({
     'date.base': 'Registered date must be a valid date'
   })
@@ -51,6 +75,9 @@ const createBorrowerSchema = Joi.object({
 const updateBorrowerSchema = Joi.object({
   name: Joi.string().min(1).max(255).optional(),
   email: Joi.string().email().max(255).optional(),
+  phone: Joi.string().pattern(/^\+?[1-9]\d{1,14}$/).optional().allow('').messages({
+    'string.pattern.base': 'Phone number must be a valid international format'
+  }),
   registered_date: Joi.date().optional()
 });
 

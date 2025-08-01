@@ -31,14 +31,14 @@ class BookService {
 
   async createBook(bookData) {
     try {
-      const { title, author, isbn, quantity, shelf_location } = bookData;
+      const { title, author, isbn, quantity, available_quantity, shelf_location } = bookData;
       
       const book = await Book.create({
         title,
         author,
         isbn,
         quantity,
-        available_quantity: quantity,
+        available_quantity: available_quantity !== undefined ? available_quantity : quantity,
         shelf_location
       });
       
@@ -62,13 +62,23 @@ class BookService {
         throw new NotFoundError('Book not found');
       }
 
-      // If quantity is being updated, adjust available_quantity proportionally
-      if (bookData.quantity !== undefined) {
+      // Validate available_quantity against quantity (current or new)
+      const finalQuantity = bookData.quantity !== undefined ? bookData.quantity : book.quantity;
+      const finalAvailableQuantity = bookData.available_quantity !== undefined ? bookData.available_quantity : book.available_quantity;
+      
+      if (finalAvailableQuantity > finalQuantity) {
+        throw new ValidationError('Available quantity cannot be greater than total quantity');
+      }
+
+      // If quantity is being updated but available_quantity is not provided,
+      // adjust available_quantity proportionally
+      if (bookData.quantity !== undefined && bookData.available_quantity === undefined) {
         const borrowedQuantity = book.quantity - book.available_quantity;
         bookData.available_quantity = Math.max(0, bookData.quantity - borrowedQuantity);
       }
       
       await book.update(bookData);
+      await book.reload(); // Reload to get fresh data
       
       return book;
     } catch (error) {
