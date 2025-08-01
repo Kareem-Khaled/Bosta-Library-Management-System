@@ -4,9 +4,27 @@ const { Op } = require('sequelize');
 const sequelize = require('../database/sequelize');
 
 class BorrowingService {
-  async getAllBorrowings() {
+  async getAllBorrowings(filters = {}) {
     try {
+      const whereClause = {};
+      
+      // Apply filters if provided
+      if (filters.book_id) {
+        whereClause.book_id = filters.book_id;
+      }
+      if (filters.borrower_id) {
+        whereClause.borrower_id = filters.borrower_id;
+      }
+      if (filters.status) {
+        if (filters.status === 'active') {
+          whereClause.return_date = null;
+        } else if (filters.status === 'returned') {
+          whereClause.return_date = { [require('sequelize').Op.ne]: null };
+        }
+      }
+
       const borrowings = await Borrowing.findAll({
+        where: whereClause,
         include: [
           {
             association: 'book',

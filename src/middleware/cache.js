@@ -142,7 +142,7 @@ const cacheManager = {
     }
     
     // Borrowing changes might affect book availability, so also clear book cache
-    this.invalidateBookCache();
+    cacheManager.invalidateBookCache();
     stats.deletes++;
   },
 
